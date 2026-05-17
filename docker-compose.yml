@@ -1,0 +1,13 @@
+services:
+  auratrace-ml:
+    build: .
+    container_name: auratrace-ml
+    ports:
+      - "5050:8000"
+    restart: unless-stopped
+    networks:
+      - mobile-app_app_network
+
+networks:
+  mobile-app_app_network:
+    external: true
