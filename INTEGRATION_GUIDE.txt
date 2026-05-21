@@ -1,0 +1,298 @@
+================================================================================
+AURATRACE ML - SETUP & LARAVEL INTEGRATION GUIDE
+================================================================================
+For: Co-Developer
+Date: May 22, 2026
+
+This guide covers:
+1. Setting up AuraTrace ML on your laptop
+2. Connecting it to your Laravel folder
+
+================================================================================
+PART 1: SETUP ON YOUR LAPTOP
+================================================================================
+
+STEP 1: Clone the Repository
+   git clone https://github.com/YOUR_USERNAME/auratrace-ml.git
+   cd auratrace-ml
+
+STEP 2: Install Python Requirements
+   Make sure you have Python 3.8+ installed
+   
+   Then run:
+   pip install -r requirements.txt
+   
+   This installs all dependencies including Flask, YOLOv8n, PyTorch, etc.
+
+STEP 3: Verify Model File
+   Check if the trained model exists:
+   ls app/models/best.pt
+   
+   If it exists, you're ready! ✅
+
+STEP 4: Test Flask Locally
+   python main.py
+   
+   You should see:
+   * Running on http://127.0.0.1:8000
+   
+   Keep this terminal OPEN while developing!
+
+================================================================================
+PART 2: THE 3 SYSTEMS
+================================================================================
+
+1️⃣ YOLOV8N - Item Identification
+   - Detects items from images
+   - Returns: Item name, confidence, category ID
+   - API: POST /identify
+
+2️⃣ BAYESIAN - Probability Matching
+   - Matches lost with found reports
+   - Returns: Match probability (HIGH/MEDIUM/LOW)
+   - API: POST /match
+
+3️⃣ MONTE CARLO - Storage Prediction
+   - Predicts when storage will be full
+   - Returns: Days until overflow
+   - API: POST /predict-storage
+
+================================================================================
+PART 3: CONNECTING TO LARAVEL
+================================================================================
+
+Your Laravel app will send requests to Flask (http://127.0.0.1:8000)
+
+STEP 1: Create Laravel Controller
+
+In your Laravel project, create a controller:
+
+File: app/Http/Controllers/AuraTraceController.php
+
+   <?php
+   
+   namespace App\Http\Controllers;
+   
+   use Illuminate\Http\Request;
+   use Illuminate\Support\Facades\Http;
+   
+   class AuraTraceController extends Controller
+   {
+       // 1. IDENTIFY ITEM FROM IMAGE
+       public function identifyItem(Request $request)
+       {
+           $validated = $request->validate([
+               'image' => 'required|image|mimes:jpeg,png,jpg'
+           ]);
+           
+           $response = Http::attach(
+               'image', 
+               fopen($request->file('image')->path(), 'r'),
+               'image.jpg'
+           )->post('http://127.0.0.1:8000/identify');
+           
+           return response()->json($response->json());
+       }
+       
+       // 2. MATCH LOST & FOUND REPORTS
+       public function matchReports(Request $request)
+       {
+           $response = Http::post('http://127.0.0.1:8000/match', [
+               'found_item' => [
+                   'category_id' => $request->found_category,
+                   'zone_id' => $request->found_zone,
+                   'found_at' => $request->found_at
+               ],
+               'lost_report' => [
+                   'category_id' => $request->lost_category,
+                   'zone_id' => $request->lost_zone,
+                   'lost_at' => $request->lost_at
+               ]
+           ]);
+           
+           return response()->json($response->json());
+       }
+       
+       // 3. PREDICT STORAGE OVERFLOW
+       public function predictStorage(Request $request)
+       {
+           $response = Http::post('http://127.0.0.1:8000/predict-storage', [
+               'current_count' => $request->current_count,
+               'capacity' => $request->capacity,
+               'avg_items_per_day' => $request->avg_items_per_day
+           ]);
+           
+           return response()->json($response->json());
+       }
+   }
+
+STEP 2: Add Routes
+
+In routes/api.php or routes/web.php:
+
+   Route::post('/identify-item', [AuraTraceController::class, 'identifyItem']);
+   Route::post('/match-reports', [AuraTraceController::class, 'matchReports']);
+   Route::post('/predict-storage', [AuraTraceController::class, 'predictStorage']);
+
+STEP 3: Call from your Frontend (JavaScript)
+
+In your Blade template or Vue component:
+
+   // 1. Identify Item
+   const formData = new FormData();
+   formData.append('image', imageFile);
+   
+   fetch('/identify-item', {
+       method: 'POST',
+       body: formData
+   })
+   .then(res => res.json())
+   .then(data => {
+       console.log('Item detected:', data.detected);
+       console.log('Confidence:', data.confidence);
+       console.log('Category:', data.category_id);
+   });
+
+   // 2. Match Reports
+   fetch('/match-reports', {
+       method: 'POST',
+       headers: { 'Content-Type': 'application/json' },
+       body: JSON.stringify({
+           found_category: 1,
+           found_zone: 5,
+           found_at: '2026-05-22 10:30:00',
+           lost_category: 1,
+           lost_zone: 5,
+           lost_at: '2026-05-22 09:00:00'
+       })
+   })
+   .then(res => res.json())
+   .then(data => {
+       console.log('Match probability:', data.probability);
+       console.log('Risk level:', data.label);
+   });
+
+   // 3. Predict Storage
+   fetch('/predict-storage', {
+       method: 'POST',
+       headers: { 'Content-Type': 'application/json' },
+       body: JSON.stringify({
+           current_count: 50,
+           capacity: 100,
+           avg_items_per_day: 2.5
+       })
+   })
+   .then(res => res.json())
+   .then(data => {
+       console.log('Prediction:', data.prediction);
+   });
+
+================================================================================
+PART 4: ITEM CATEGORIES
+================================================================================
+
+Category ID | Items
+-----------+---------------------
+1           | Backpack, Bag
+2           | Wallet
+3           | Smartphone, Phone
+7           | Laptop, Computer
+13          | Shoe, Shoes
+14          | T-shirt, Shirt
+15          | Tumbler, Bottle
+
+================================================================================
+PART 5: DEVELOPMENT SETUP
+================================================================================
+
+Terminal 1 - Start Flask:
+   cd auratrace-ml
+   python main.py
+   (Keep this running)
+
+Terminal 2 - Start Laravel:
+   cd your-laravel-folder
+   php artisan serve
+   (Runs on http://127.0.0.1:8000 or similar)
+
+Terminal 3 - Watch Assets (if using Vite/Webpack):
+   npm run dev
+
+Then open your Laravel app in browser and test!
+
+================================================================================
+PART 6: TROUBLESHOOTING
+================================================================================
+
+"Connection refused on port 8000"
+→ Make sure Flask is running (python main.py)
+
+"ModuleNotFoundError: No module named 'ultralytics'"
+→ Run: pip install -r requirements.txt
+
+"File not found: app/models/best.pt"
+→ Verify the model file exists in app/models/
+
+"Slow on first image detection"
+→ Normal - first run loads the model
+→ Subsequent requests are much faster
+
+"Laravel can't reach Flask"
+→ Make sure Flask is running
+→ Check URL: http://127.0.0.1:8000 (exact)
+
+================================================================================
+PART 7: QUICK CHECKLIST
+================================================================================
+
+☐ Clone auratrace-ml repo
+☐ pip install -r requirements.txt
+☐ Verify app/models/best.pt exists
+☐ python main.py (test Flask server)
+☐ Create AuraTraceController.php
+☐ Add routes in Laravel
+☐ Call endpoints from Laravel frontend
+☐ Test each feature
+☐ Handle errors
+
+================================================================================
+PART 8: API RESPONSE EXAMPLES
+================================================================================
+
+SUCCESS - Identify Item:
+{
+    "success": true,
+    "detected": "laptop",
+    "confidence": 95.42,
+    "category_id": 7,
+    "matched_label": "laptop",
+    "top5": [
+        {"label": "laptop", "confidence": 95.42},
+        {"label": "computer", "confidence": 3.21}
+    ]
+}
+
+SUCCESS - Match Reports:
+{
+    "success": true,
+    "probability": 87.5,
+    "label": "HIGH"
+}
+
+SUCCESS - Storage Prediction:
+{
+    "success": true,
+    "prediction": "20 days until storage is full"
+}
+
+ERROR - Any Endpoint:
+{
+    "success": false,
+    "error": "error message here"
+}
+
+================================================================================
+END OF GUIDE
+================================================================================
+END OF INTEGRATION GUIDE
+================================================================================
