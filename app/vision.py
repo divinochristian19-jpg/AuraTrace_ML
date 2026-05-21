@@ -1,23 +1,9 @@
-import torch
-import torchvision.transforms as transforms
-from torchvision.models import mobilenet_v2, MobileNet_V2_Weights
+from ultralytics import YOLO
 from PIL import Image
-import urllib.request
 import io
 
-weights = MobileNet_V2_Weights.DEFAULT
-model = mobilenet_v2(weights=weights)
-model.eval()
-
-preprocess = transforms.Compose([
-    transforms.Resize(256),
-    transforms.CenterCrop(224),
-    transforms.ToTensor(),
-    transforms.Normalize(
-        mean=[0.485, 0.456, 0.406],
-        std=[0.229, 0.224, 0.225]
-    ),
-])
+# Load your custom YOLOv8n model
+model = YOLO('app/models/best.pt')  # Replace with your trained model path
 
 CATEGORY_MAP = {
     'backpack':       1,
@@ -52,27 +38,38 @@ CATEGORY_MAP = {
 def identify_item(image_bytes: bytes) -> dict:
     try:
         image = Image.open(io.BytesIO(image_bytes)).convert('RGB')
-        input_tensor = preprocess(image).unsqueeze(0)
-
-        with torch.no_grad():
-            output = model(input_tensor)
-
-        probabilities = torch.nn.functional.softmax(output[0], dim=0)
-        top5_prob, top5_idx = torch.topk(probabilities, 5)
-
-        categories = weights.meta['categories']
-
-        results = []
-        for prob, idx in zip(top5_prob, top5_idx):
-            label = categories[idx.item()].lower()
-            results.append({
+        
+        # Run YOLOv8n inference
+        results = model(image, conf=0.25)  # conf threshold at 0.25
+        result = results[0]
+        
+        if len(result.boxes) == 0:
+            return {
+                'success': True,
+                'detected': None,
+                'confidence': 0,
+                'category_id': None,
+                'matched_label': None,
+                'top5': [],
+            }
+        
+        # Get all detections sorted by confidence
+        detections = []
+        for box, conf, cls_id in zip(result.boxes.xyxy, result.boxes.conf, result.boxes.cls):
+            label = result.names[int(cls_id)].lower()
+            confidence = round(float(conf) * 100, 2)
+            detections.append({
                 'label': label,
-                'confidence': round(prob.item() * 100, 2)
+                'confidence': confidence
             })
-
-        detected_label = results[0]['label']
-        detected_confidence = results[0]['confidence']
-
+        
+        # Sort by confidence (descending) and get top 5
+        detections_sorted = sorted(detections, key=lambda x: x['confidence'], reverse=True)[:5]
+        
+        detected_label = detections_sorted[0]['label']
+        detected_confidence = detections_sorted[0]['confidence']
+        
+        # Map to category
         category_id = None
         matched_label = None
         for key, cid in CATEGORY_MAP.items():
@@ -80,15 +77,15 @@ def identify_item(image_bytes: bytes) -> dict:
                 category_id = cid
                 matched_label = key
                 break
-
+        
         return {
             'success': True,
             'detected': detected_label,
             'confidence': detected_confidence,
             'category_id': category_id,
             'matched_label': matched_label,
-            'top5': results,
+            'top5': detections_sorted,
         }
-
+    
     except Exception as e:
         return {'success': False, 'error': str(e)}
